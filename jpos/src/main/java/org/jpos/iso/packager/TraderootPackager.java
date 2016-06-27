@@ -18,7 +18,6 @@
 
 package org.jpos.iso.packager;
 
-
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Map;
@@ -47,24 +46,26 @@ public class TraderootPackager extends GenericPackager
      * @return      Message image
      * @exception ISOException
      */
+    @Override
     public byte[] pack (ISOComponent m) throws ISOException
     {
         LogEvent evt = null;
         if (logger != null)
             evt = new LogEvent (this, "pack");
+
         try {
-            if (m.getComposite() != m) 
+            if (m.getComposite() != m)
                 throw new ISOException ("Can't call packager on non Composite");
 
-            ISOComponent c;
             ArrayList<byte[]> v = new ArrayList<byte[]>(128);
-            Map fields = m.getChildren();
-            int len = 0;
-            int first = getFirstField();
-
-            c = (ISOComponent) fields.get (0);
             byte[] b;
             byte[] hdr= null;
+            int len = 0;
+
+            Map fields = m.getChildren();
+            ISOComponent c = (ISOComponent) fields.get (0);
+            int first = getFirstField();
+
 
             // pre-read header, if it exists, and advance total len
             if (m instanceof ISOMsg && headerLength>0)
@@ -167,6 +168,7 @@ public class TraderootPackager extends GenericPackager
      * @return      consumed bytes
      * @exception ISOException
      */
+    @Override
     public int unpack (ISOComponent m, byte[] b) throws ISOException
     {
         LogEvent evt = logger != null ? new LogEvent (this, "unpack") : null;
@@ -214,6 +216,11 @@ public class TraderootPackager extends GenericPackager
                     if (bmap == null && fld[i] == null)
                         continue;
 
+                    // maxField is min(fld.length-1, bmap.length()-1), therefore
+                    // "maxField > 128" means fld[] has packagers defined above 128, *and*
+                    // the bitmap's length is greater than 128 (i.e., a tertiary bitmap exists).
+                    // In this case, bit 65 simply indicates a 3rd bitmap contiguous to the 2nd one.
+                    // Therefore, there MUST NOT be a DE-65 with data to read.
                     if (maxField > 128 && i==65)
                         continue;   // ignore extended bitmap
 
