@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Map;
 
+import org.xml.sax.Attributes;
+
 import org.jpos.iso.*;
 import org.jpos.util.LogEvent;
 import org.jpos.util.Logger;
@@ -30,18 +32,60 @@ import org.jpos.util.Logger;
 /**
  * Adaptation of GenericPackager for Traderoot.
  *
+ * BBB TODO In the future, this code can be refactored into {@link ISOBasePackager}
+ * BBB TODO and {@link GenericPackager} in order to generalize it for cases where
+ * BBB TODO the 3rd bitmap comes as a Data Element
+ *
  * @author Barzilai Spinak &lt;barspi@transactility.com>
  */
 @SuppressWarnings ("unused")
 public class TraderootPackager extends GenericPackager
 {
+    // BBB TODO refactor this property into ISOBasePackager
+    protected int thirdBitmapField= -1;         // for implementations where the tertiary bitmap is inside a Data Element
 
     public TraderootPackager() throws ISOException
     {
         super();
+        setThirdBitmapField(127);
     }
 
+    @Override
+    protected void setGenericPackagerParams (Attributes atts)
+    {
+        super.setGenericPackagerParams(atts);
+        // BBB TODO genericpackager.dtd should declare an attribute called "thirdBitmapField"
+        // BBB TODO Add this code to GenericPackager in the future when refactoring.
+        // BBB TODO and we won't need to override the method here
+//        String thirdbmf= atts.getValue("thirdBitmapField");
+//        if (thirdbmf != null)
+//            try { setThirdBitmapField(Integer.parseInt(thirdbmf)); }
+//            catch (ISOException e)
+//            {   // BBB throwing unchecked exception in order not to change the method's contract
+//                // BBB (the parseInt's and valueOf's in super are doing it anyway...)
+//                throw new IllegalArgumentException(e.getMessage());
+//            }
+        
+    }
+
+    // BBB TODO refactor this method into ISOBasePackager
+    public void setThirdBitmapField(int f) throws ISOException
+    {
+        if (f > 128)
+            throw new ISOException("thirdBitmapField should be <= 128");
+        thirdBitmapField= f;
+    }
+    // BBB TODO refactor this method into ISOBasePackager
+    public int getThirdBitmapField() { return thirdBitmapField; }
+
     /**
+     * pack method that works in conjunction with {@link #unpack(ISOComponent, byte[])}
+     * Handles a tertiary bitmap appearing on Data Element {@code thirdBitmapField}.
+     * It works with Traderoot's implementation using DE-127.
+     *
+     * BBB TODO This pack method is based on {@link org.jpos.iso.ISOBasePackager#pack(ISOComponent)}
+     * BBB TODO refactor this code into {@link ISOBasePackager} in the future
+     *
      * @param   m   the Component to pack
      * @return      Message image
      * @exception ISOException
@@ -81,9 +125,43 @@ public class TraderootPackager extends GenericPackager
                 v.add (b);
             }
 
-            if (emitBitMap()) {
-                // BITMAP (-1 in HashTable)
+            BitSet bmap12= null;                            // will store primary and secondary part of bitmap
+            BitSet bmap3= null;                             // will store tertiary part of bitmap
+            if (emitBitMap())
+            {   // The ISOComponent stores a single bitmap in -1, which could be up to 192
+                // bits long. If we have a thirdBitmapField, we may need to split the full
+                // bitmap into 1&2 at the beginning (16 bytes), and 3rd inside the Data Element
                 c = (ISOComponent) fields.get (-1);
+                bmap12= (BitSet)c.getValue();               // the full bitmap (up to 192 bits long)
+
+                if (thirdBitmapField > 0)                   // we may need to split it!
+                {
+                    if (bmap12.length() - 1 > 128)          // some bits are set in the 3rd bitmap
+                    {
+                        bmap3= bmap12.get(128, 193);        // new bitmap, with the high 3rd bitmap (use 128 as dummy bit0)
+                        bmap3.clear(0);                     // don't really need to clear dummy bit0 I guess...
+                        bmap12.set(thirdBitmapField);       // indicate presence of field that will hold the 3rd bitmap
+                        bmap12.clear(129, 193);             // clear high part, so pack method will not use it
+
+                        ISOBitMap bmField= new ISOBitMap(thirdBitmapField);
+                        bmField.setValue(bmap3);
+                        m.set(bmField);
+                        fields.put(thirdBitmapField, bmField);  // fields is a clone of m's inner map, so we store it here as well
+
+                        // bit65 should only be set if there's a DE-65 (which there should not!)
+                        bmap12.set(65, fields.get(65) == null ? false : true);
+                    }
+                    else
+                    {   // else: No bits/fields above 128.
+                        // In case there's an old (residual/garbage) field `thirdBitmapField` in the message
+                        // we need to clear the bit and the data
+                        m.unset(thirdBitmapField);                // remove from ISOMsg
+                        bmap12.clear(thirdBitmapField);           // remove from inner bitmap
+                        fields.remove(thirdBitmapField);          // remove from fields clone
+                    }
+                }
+                // now will emit the 1st and 2nd bitmaps, and the loop below will take care of 3rd
+                // when emitting field `thirdBitmapField`
                 b = getBitMapfieldPackager().pack(c);
                 len += b.length;
                 v.add (b);
@@ -92,7 +170,7 @@ public class TraderootPackager extends GenericPackager
             // if Field 1 is a BitMap then we are packing an
             // ISO-8583 message so next field is fld#2.
             // else we are packing an ANSI X9.2 message, first field is 1
-            int tmpMaxField=Math.min (m.getMaxField(), 128);
+            int tmpMaxField=Math.min (m.getMaxField(), bmap3 != null ? 192 : 128);
 
             for (int i=first; i<=tmpMaxField; i++) {
                 if ((c=(ISOComponent) fields.get (i)) != null)
@@ -115,25 +193,26 @@ public class TraderootPackager extends GenericPackager
                 }
             }
 
-            if(m.getMaxField()>128 && fld.length > 128) {
-                for (int i=1; i<=64; i++) {
-                    if ((c = (ISOComponent)fields.get (i + 128)) != null)
-                    {
-                        try {
-                            b = fld[i+128].pack(c);
-                            len += b.length;
-                            v.add (b);
-                        } catch (ISOException e) {
-                            if (evt != null) {
-                                evt.addMessage ("error packing field "+(i+128));
-                                evt.addMessage (c);
-                                evt.addMessage (e);
-                            }
-                            throw e;
-                        }
-                    }
-                }
-            }
+// BBB This part not needed
+//            if(m.getMaxField()>128 && fld.length > 128) {
+//                for (int i=1; i<=64; i++) {
+//                    if ((c = (ISOComponent)fields.get (i + 128)) != null)
+//                    {
+//                        try {
+//                            b = fld[i+128].pack(c);
+//                            len += b.length;
+//                            v.add (b);
+//                        } catch (ISOException e) {
+//                            if (evt != null) {
+//                                evt.addMessage ("error packing field "+(i+128));
+//                                evt.addMessage (c);
+//                                evt.addMessage (e);
+//                            }
+//                            throw e;
+//                        }
+//                    }
+//                }
+//            }
 
             int k = 0;
             byte[] d = new byte[len];
@@ -169,6 +248,7 @@ public class TraderootPackager extends GenericPackager
      * @exception ISOException
      */
     @Override
+    // BBB TODO refactor the changes in this method into ISOBasePackager
     public int unpack (ISOComponent m, byte[] b) throws ISOException
     {
         LogEvent evt = logger != null ? new LogEvent (this, "unpack") : null;
@@ -198,12 +278,14 @@ public class TraderootPackager extends GenericPackager
             }
 
             BitSet bmap = null;
+            int bmapBytes= 0;                                   // bitmap length in bytes (usually 8, 16, 24)
             int maxField= fld.length - 1;                       // array length counts position 0!
 
             if (emitBitMap()) {
                 ISOBitMap bitmap = new ISOBitMap (-1);
                 consumed += getBitMapfieldPackager().unpack(bitmap,b,consumed);
                 bmap = (BitSet) bitmap.getValue();
+                bmapBytes= (bmap.length()-1 + 63) >> 6 << 3;
                 if (evt != null)
                     evt.addMessage ("<bitmap>"+bmap.toString()+"</bitmap>");
                 m.set (bitmap);
@@ -233,6 +315,23 @@ public class TraderootPackager extends GenericPackager
                         if (evt != null)
                             fieldUnpackLogger(evt, i, c, fld);
                         m.set(c);
+
+                        if (i == thirdBitmapField && fld.length > 129 &&          // fld[128] is at pos 129
+                            bmapBytes == 16 &&
+                            fld[thirdBitmapField] instanceof ISOBitMapPackager)
+                        {   // We have a weird case of tertiary bitmap implemented inside a Data Element
+                            // instead of contiguous to the primary and secondary bitmaps.
+                            // If we're inside this "if" we have a proper 16-byte bitmap (1st & 2nd),
+                            // but are expecting more than 128 Data Elements.
+                            // Normally, this kind of implementations have the tertiary bitmap in DE-65,
+                            // but sometimes, even stranger, in some other DE (thirdBitmapField).
+                            // We also double check that the DE has been specified as an ISOBitMapPackager
+                            // The tertiary bitmap has already been unpacked into field `thirdBitmapField`
+                            BitSet bs3rd= (BitSet)((ISOComponent)m.getChildren().get(thirdBitmapField)).getValue();
+                            maxField= 128 + (bs3rd.length() - 1);                 // update loop end condition
+                            for (int bit= 1; bit <= 64; bit++)
+                                bmap.set(bit+128, bs3rd.get(bit));                // extend bmap with new bits above 128
+                        }
                     }
                 } catch (ISOException e) {
                     if (evt != null) {
