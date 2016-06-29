@@ -57,6 +57,8 @@ public class TraderootPackager extends GenericPackager
         // BBB TODO genericpackager.dtd should declare an attribute called "thirdBitmapField"
         // BBB TODO Add this code to GenericPackager in the future when refactoring.
         // BBB TODO and we won't need to override the method here
+        // BBB
+        // BBB TODO IDEA: check somewhere that fld[thirdBitmapField] instanceof ISOBitMapPackager???
 //        String thirdbmf= atts.getValue("thirdBitmapField");
 //        if (thirdbmf != null)
 //            try { setThirdBitmapField(Integer.parseInt(thirdbmf)); }
@@ -134,7 +136,8 @@ public class TraderootPackager extends GenericPackager
                 c = (ISOComponent) fields.get (-1);
                 bmap12= (BitSet)c.getValue();               // the full bitmap (up to 192 bits long)
 
-                if (thirdBitmapField > 0)                   // we may need to split it!
+                if (thirdBitmapField > 0 &&                 // we may need to split it!
+                    fld[thirdBitmapField] instanceof ISOBitMapPackager)
                 {
                     if (bmap12.length() - 1 > 128)          // some bits are set in the 3rd bitmap
                     {
@@ -146,7 +149,7 @@ public class TraderootPackager extends GenericPackager
                         ISOBitMap bmField= new ISOBitMap(thirdBitmapField);
                         bmField.setValue(bmap3);
                         m.set(bmField);
-                        fields.put(thirdBitmapField, bmField);  // fields is a clone of m's inner map, so we store it here as well
+                        fields.put(thirdBitmapField, bmField);    // fields is a clone of m's inner map, so we store it here as well
 
                         // bit65 should only be set if there's a DE-65 (which there should not!)
                         bmap12.set(65, fields.get(65) == null ? false : true);
