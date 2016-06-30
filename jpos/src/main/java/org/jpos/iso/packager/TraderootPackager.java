@@ -32,12 +32,11 @@ import org.jpos.util.Logger;
 /**
  * Adaptation of GenericPackager for Traderoot.
  *
- * BBB TODO In the future, this code can be refactored into {@link ISOBasePackager}
- * BBB TODO and {@link GenericPackager} in order to generalize it for cases where
- * BBB TODO the 3rd bitmap comes as a Data Element
- *
  * @author Barzilai Spinak &lt;barspi@transactility.com>
  */
+// BBB TODO In the future, this code can be refactored into {@link ISOBasePackager}
+// BBB TODO and {@link GenericPackager} in order to generalize it for cases where
+// BBB TODO the 3rd bitmap comes as a Data Element
 @SuppressWarnings ("unused")
 public class TraderootPackager extends GenericPackager
 {
@@ -81,17 +80,17 @@ public class TraderootPackager extends GenericPackager
     public int getThirdBitmapField() { return thirdBitmapField; }
 
     /**
-     * pack method that works in conjunction with {@link #unpack(ISOComponent, byte[])}
-     * Handles a tertiary bitmap appearing on Data Element {@code thirdBitmapField}.
-     * It works with Traderoot's implementation using DE-127.
-     *
-     * BBB TODO This pack method is based on {@link org.jpos.iso.ISOBasePackager#pack(ISOComponent)}
-     * BBB TODO refactor this code into {@link ISOBasePackager} in the future
+     * pack method that works in conjunction with {@link #unpack(ISOComponent, byte[])}.
+     * <p>
+     * Handles a tertiary bitmap appearing on Data Element {@code thirdBitmapField}.<br>
+     * It works with Traderoot's implementation using DE-127.<br>
      *
      * @param   m   the Component to pack
      * @return      Message image
      * @exception ISOException
      */
+    // BBB TODO This pack method is based on {@link org.jpos.iso.ISOBasePackager#pack(ISOComponent)}
+    // BBB TODO refactor this code into {@link ISOBasePackager} in the future
     @Override
     public byte[] pack (ISOComponent m) throws ISOException
     {
@@ -173,7 +172,7 @@ public class TraderootPackager extends GenericPackager
             // if Field 1 is a BitMap then we are packing an
             // ISO-8583 message so next field is fld#2.
             // else we are packing an ANSI X9.2 message, first field is 1
-            int tmpMaxField=Math.min (m.getMaxField(), bmap3 != null ? 192 : 128);
+            int tmpMaxField=Math.min (m.getMaxField(), (bmap3 != null || fld.length > 129) ? 192 : 128);
 
             for (int i=first; i<=tmpMaxField; i++) {
                 if ((c=(ISOComponent) fields.get (i)) != null)
